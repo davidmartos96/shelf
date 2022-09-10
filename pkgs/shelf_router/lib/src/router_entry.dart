@@ -44,13 +44,16 @@ class RouterEntry {
   final RegExp _routePattern;
 
   /// Names for the parameters in the route pattern.
-  final List<String> _params;
+  final List<ParamInfo> _paramInfos;
+
+  List<ParamInfo> get paramInfos => _paramInfos.toList();
 
   /// List of parameter names in the route pattern.
-  List<String> get params => _params.toList(); // exposed for using generator.
+  // exposed for using generator.
+  List<String> get params => _paramInfos.map((p) => p.name).toList();
 
   RouterEntry._(this.verb, this.route, this._handler, this._middleware,
-      this._routePattern, this._params, this._mounted);
+      this._routePattern, this._paramInfos, this._mounted);
 
   factory RouterEntry(
     String verb,
@@ -66,12 +69,21 @@ class RouterEntry {
           route, 'route', 'expected route to start with a slash');
     }
 
-    final params = <String>[];
+    final params = <ParamInfo>[];
     var pattern = '';
     for (var m in _parser.allMatches(route)) {
-      pattern += RegExp.escape(m[1]!);
+      final firstGroup = m[1]!;
+      pattern += RegExp.escape(firstGroup);
       if (m[2] != null) {
-        params.add(m[2]!);
+        final paramName = m[2]!;
+        final startIdx = firstGroup.length;
+        //final endIdx = startIdx + paramName.length;
+        final paramInfo = ParamInfo(
+          name: paramName,
+          startIdx: startIdx,
+          endIdx: m.end,
+        );
+        params.add(paramInfo);
         if (m[3] != null && !_isNoCapture(m[3]!)) {
           throw ArgumentError.value(
               route, 'route', 'expression for "${m[2]}" is capturing');
@@ -95,9 +107,10 @@ class RouterEntry {
     }
     // Construct map from parameter name to matched value
     var params = <String, String>{};
-    for (var i = 0; i < _params.length; i++) {
+    for (var i = 0; i < _paramInfos.length; i++) {
       // first group is always the full match, we ignore this group.
-      params[_params[i]] = m[i + 1]!;
+      final paramInfo = _paramInfos[i];
+      params[paramInfo.name] = m[i + 1]!;
     }
     return params;
   }
@@ -114,14 +127,26 @@ class RouterEntry {
         return await _handler(request, this) as Response;
       }
 
-      if (_handler is Handler || _params.isEmpty) {
+      if (_handler is Handler || _paramInfos.isEmpty) {
         return await _handler(request) as Response;
       }
 
       return await Function.apply(_handler, [
         request,
-        ..._params.map((n) => params[n]),
+        ..._paramInfos.map((info) => params[info.name]),
       ]) as Response;
     })(request);
   }
+}
+
+class ParamInfo {
+  final String name;
+  final int startIdx;
+  final int endIdx;
+
+  const ParamInfo({
+    required this.name,
+    required this.startIdx,
+    required this.endIdx,
+  });
 }
